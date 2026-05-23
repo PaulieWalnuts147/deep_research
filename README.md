@@ -10,17 +10,19 @@ deep_research.py (UI)
        ▼
 research_manager.py
        │
-       ├── clarifier_agent  → 3 clarifying questions (phase 1)
-       ├── planner_agent    → plans ~5 search queries
-       ├── search_agent     → web search + short summaries (parallel)
-       ├── writer_agent     → long markdown report
-       └── email_agent      → HTML email via SendGrid
+       ├── clarifier_agent      → 3 clarifying questions (phase 1, imperative)
+       └── coordinator_agent    → ResearchCoordinator (phase 2)
+              ├── run_planner_tool      → planner_agent
+              ├── run_searches_from_plan_tool → search_agent (parallel)
+              ├── run_writer_tool           → writer_agent
+              └── handoff → email_agent
 ```
 
 | File | Role |
 |------|------|
 | `src/deep_research.py` | Gradio app entry point (two-phase UI) |
-| `src/research_manager.py` | Orchestrates clarify → plan → search → write → email |
+| `src/research_manager.py` | Clarify step + runs coordinator (streaming status) |
+| `src/coordinator_agent.py` | Coordinator agent: tools + email handoff |
 | `src/clarifier_agent.py` | 3 structured clarifying questions |
 | `src/planner_agent.py` | Structured search plan (`WebSearchPlan`) |
 | `src/search_agent.py` | `WebSearchTool` summaries per query |
@@ -83,6 +85,7 @@ deep_research/
     ├── deep_research.py
     ├── research_manager.py
     ├── clarifier_agent.py
+    ├── coordinator_agent.py
     ├── planner_agent.py
     ├── search_agent.py
     ├── writer_agent.py

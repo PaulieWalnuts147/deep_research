@@ -1,10 +1,10 @@
 from agents import Runner, trace, gen_trace_id
-from search_agent import search_agent
-from planner_agent import planner_agent, WebSearchItem, WebSearchPlan
-from writer_agent import writer_agent, ReportData
-from email_agent import email_agent
 from clarifier_agent import clarifier_agent, ClarifyingQuestions
-import asyncio
+from coordinator_agent import (
+    TOOL_LABELS,
+    build_coordinator_agent,
+    build_research_brief,
+)
 
 
 def format_clarifications(questions: list[str], answers: list[str]) -> str:
@@ -35,118 +35,50 @@ class ResearchManager:
         questions: list[str] | None = None,
         answers: list[str] | None = None,
     ):
-        """Run the deep research process, yielding status updates and the final report."""
+        """Run deep research via the coordinator agent (tools + email handoff)."""
         trace_id = gen_trace_id()
         clarifications = ""
         if questions and answers is not None:
             clarifications = format_clarifications(questions, answers)
 
+        ctx: dict = {
+            "query": query,
+            "clarifications": clarifications,
+            "last_plan": None,
+            "search_results": [],
+            "last_report": None,
+        }
+
+        coordinator = build_coordinator_agent(ctx)
+        brief = build_research_brief(query, clarifications)
+
         with trace("Research trace", trace_id=trace_id):
-            print(f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}")
-            yield f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}"
+            trace_line = (
+                f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}"
+            )
+            print(trace_line)
+            yield trace_line
             if clarifications:
                 yield "Using your clarifications to focus the research..."
-            print("Starting research...")
-            search_plan = await self.plan_searches(query, clarifications)
-            yield "Searches planned, starting to search..."
-            search_results = await self.perform_searches(query, clarifications, search_plan)
-            yield "Searches complete, writing report..."
-            report = await self.write_report(query, clarifications, search_results)
-            yield "Report written, sending email..."
-            await self.send_email(report)
-            yield "Email sent, research complete"
+            yield "Starting research (coordinator agent)..."
+
+            stream = Runner.run_streamed(coordinator, brief, max_turns=40)
+
+            async for event in stream.stream_events():
+                if event.type != "run_item_stream_event":
+                    continue
+                if event.item.type != "tool_call_item":
+                    continue
+                tool_name = getattr(event.item.raw_item, "name", None) or ""
+                label = TOOL_LABELS.get(tool_name, tool_name.replace("_", " ").strip())
+                if label:
+                    print(label)
+                    yield label
+
+            report = ctx.get("last_report")
+            if report is None:
+                yield "Research finished but no report was produced. Check the trace for details."
+                return
+
+            yield "Research complete."
             yield report.markdown_report
-
-    async def plan_searches(self, query: str, clarifications: str = "") -> WebSearchPlan:
-        """Plan the searches to perform for the query."""
-        print("Planning searches...")
-        input_text = f"Query: {query}"
-        if clarifications:
-            input_text += f"\n\n{clarifications}\n\n"
-            input_text += (
-                "Use the clarifying Q&A above to narrow the search plan. "
-                "Each search should help answer the refined intent, not generic background."
-            )
-        result = await Runner.run(
-            planner_agent,
-            input_text,
-        )
-        print(f"Will perform {len(result.final_output.searches)} searches")
-        return result.final_output_as(WebSearchPlan)
-
-    async def perform_searches(
-        self,
-        query: str,
-        clarifications: str,
-        search_plan: WebSearchPlan,
-    ) -> list[str]:
-        """Perform the searches in the plan."""
-        print("Searching...")
-        num_completed = 0
-        tasks = [
-            asyncio.create_task(self.search(query, clarifications, item))
-            for item in search_plan.searches
-        ]
-        results = []
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            if result is not None:
-                results.append(result)
-            num_completed += 1
-            print(f"Searching... {num_completed}/{len(tasks)} completed")
-        print("Finished searching")
-        return results
-
-    async def search(
-        self,
-        query: str,
-        clarifications: str,
-        item: WebSearchItem,
-    ) -> str | None:
-        """Perform a search for one plan item."""
-        parts = [f"Original query: {query}"]
-        if clarifications:
-            parts.append(clarifications)
-        parts.append(f"Search term: {item.query}\nReason for searching: {item.reason}")
-        input_text = "\n\n".join(parts)
-        try:
-            result = await Runner.run(
-                search_agent,
-                input_text,
-            )
-            return str(result.final_output)
-        except Exception:
-            return None
-
-    async def write_report(
-        self,
-        query: str,
-        clarifications: str,
-        search_results: list[str],
-    ) -> ReportData:
-        """Write the report for the query."""
-        print("Thinking about report...")
-        parts = [f"Original query: {query}"]
-        if clarifications:
-            parts.append(clarifications)
-            parts.append(
-                "Honor the user's clarifications above when structuring and emphasizing the report."
-            )
-        parts.append(f"Summarized search results: {search_results}")
-        input_text = "\n\n".join(parts)
-        result = await Runner.run(
-            writer_agent,
-            input_text,
-        )
-
-        print("Finished writing report")
-        return result.final_output_as(ReportData)
-
-    async def send_email(self, report: ReportData) -> None:
-        print("Writing email...")
-        await Runner.run(
-            email_agent,
-            report.markdown_report,
-        )
-        print("Email sent")
-        return report
