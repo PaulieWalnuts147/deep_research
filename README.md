@@ -1,6 +1,6 @@
 # Deep Research
 
-A multi-agent research assistant built with the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python). You enter a topic in a Gradio UI; the app plans web searches, runs them in parallel, writes a markdown report, and emails it via SendGrid.
+A multi-agent research assistant built with the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python). You enter a topic in a Gradio UI; the app can ask clarifying questions, plan web searches, run them in parallel, write a markdown report, and email it via SendGrid.
 
 ## How it works
 
@@ -10,16 +10,18 @@ deep_research.py (UI)
        ▼
 research_manager.py
        │
-       ├── planner_agent   → plans ~5 search queries
-       ├── search_agent    → web search + short summaries (parallel)
-       ├── writer_agent    → long markdown report
-       └── email_agent     → HTML email via SendGrid
+       ├── clarifier_agent  → 3 clarifying questions (phase 1)
+       ├── planner_agent    → plans ~5 search queries
+       ├── search_agent     → web search + short summaries (parallel)
+       ├── writer_agent     → long markdown report
+       └── email_agent      → HTML email via SendGrid
 ```
 
 | File | Role |
 |------|------|
-| `src/deep_research.py` | Gradio app entry point |
-| `src/research_manager.py` | Orchestrates plan → search → write → email |
+| `src/deep_research.py` | Gradio app entry point (two-phase UI) |
+| `src/research_manager.py` | Orchestrates clarify → plan → search → write → email |
+| `src/clarifier_agent.py` | 3 structured clarifying questions |
 | `src/planner_agent.py` | Structured search plan (`WebSearchPlan`) |
 | `src/search_agent.py` | `WebSearchTool` summaries per query |
 | `src/writer_agent.py` | Final report (`ReportData`) |
@@ -59,7 +61,12 @@ uv sync --group dev
 uv run src/deep_research.py
 ```
 
-This opens the Gradio UI in your browser. Enter a research topic and click **Run** (or press Enter). Progress updates stream into the report area; the final output is the markdown report.
+This opens the Gradio UI in your browser.
+
+1. Enter a research topic and click **Get Clarifying Questions**.
+2. Answer the three questions and click **Start Research**.
+
+Or click **Skip & Research Directly** to run without clarifications. Progress updates stream into the report area; the final output is the markdown report.
 
 Traces are logged to the [OpenAI Traces](https://platform.openai.com/traces) dashboard during a run.
 
@@ -75,6 +82,7 @@ deep_research/
 └── src/
     ├── deep_research.py
     ├── research_manager.py
+    ├── clarifier_agent.py
     ├── planner_agent.py
     ├── search_agent.py
     ├── writer_agent.py
